@@ -387,58 +387,43 @@
     </div>
   </section>
 
-  <!-- INGESTION & OCR SIMULATION VIEW -->
+  <!-- GALLERY INTELLIGENCE VIEW -->
   <section id="main-ingest" class="w-full max-w-2xl hidden">
     <div class="bg-[#14151a] border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl">
-      <h2 class="text-xl font-bold text-white mb-2">📥 إضافة وتجربة الفهرسة الذكية (OCR + المتجه)</h2>
-      <p class="text-xs text-gray-400 mb-6">سجل ذكرى جديدة فالتطبيق، وشاهد كيفاش كيتم استخراج النص وتوليد المتجه الدلالي وإضافته لقاعدة بيانات الهاتف:</p>
+      <h2 class="text-xl font-bold text-white mb-2">🖼️ فهرسة Gallery وفهم علاش الصورة مهمة</h2>
+      <p class="text-xs text-gray-400 mb-5 leading-relaxed">اختار الصور اللي بغيتي. «ذكرى» غادي تقرا الاسم، النوع، الحجم، الأبعاد، تاريخ الملف وEXIF إلا كان موجود، وتستعمل وصفك باش تعرف علاش ممكن تحتاجها من بعد. كلشي كيبقى محلي فهاد المتصفح.</p>
 
-      <form id="custom-ingest-form" onsubmit="event.preventDefault(); submitNewMemory();" class="space-y-4">
-        <div>
-          <label class="block text-xs font-bold text-gray-300 mb-1">عنوان الذكرى:</label>
-          <input id="input-title" type="text" required placeholder="مثال: ورقة المقادير د الكسكسو، فاتورة ليديك، روشيت..." class="w-full bg-[#1b1c22] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-amber-500 outline-none">
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-bold text-gray-300 mb-1">المصدر (Source):</label>
-            <select id="input-source" class="w-full bg-[#1b1c22] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:border-amber-500 outline-none">
-              <option value="يوتيوب">يوتيوب (YouTube)</option>
-              <option value="واتساب">واتساب (WhatsApp)</option>
-              <option value="لقطة شاشة">لقطة شاشة (Screenshot)</option>
-              <option value="التقويم">التقويم (Calendar)</option>
-              <option value="الصور">الصور (Gallery)</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-gray-300 mb-1">التصنيف (Category):</label>
-            <select id="input-cat" class="w-full bg-[#1b1c22] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:border-amber-500 outline-none">
-              <option value="وصفة">وصفة</option>
-              <option value="موعد الطبيب">موعد الطبيب</option>
-              <option value="حديث محفوظ">حديث محفوظ</option>
-              <option value="صورة العيد">صورة العيد</option>
-              <option value="أخرى">أخرى</option>
-            </select>
-          </div>
-        </div>
+      <div class="space-y-4">
+        <label class="block border border-dashed border-amber-500/50 bg-amber-500/5 rounded-2xl p-5 text-center cursor-pointer hover:bg-amber-500/10 transition">
+          <input id="gallery-input" type="file" accept="image/*" multiple class="hidden">
+          <span class="text-3xl">📷</span>
+          <span class="block text-sm text-amber-300 font-bold mt-2">اختار صور من Gallery</span>
+          <span class="block text-[11px] text-gray-500 mt-1">اختيار متعدد مسموح · ما كاين حتى Upload</span>
+        </label>
 
         <div>
-          <label class="block text-xs font-bold text-gray-300 mb-1">النص المستخرج أو تفاصيل الذكرى (OCR Content):</label>
-          <textarea id="input-content" rows="3" required placeholder="اكتب الملاحظة أو النص المستخرج بالدارجة أو العربية..." class="w-full bg-[#1b1c22] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-amber-500 outline-none"></textarea>
+          <label class="block text-xs font-bold text-gray-300 mb-1">شنو كتعني هاد الصور أو علاش باغيهم؟ (اختياري)</label>
+          <textarea id="gallery-note" rows="2" placeholder="مثال: تصويرة ديال العيد مع العائلة، بغيتها نتفكر شكون كان حاضر..." class="w-full bg-[#1b1c22] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:border-amber-500 outline-none"></textarea>
         </div>
 
-        <button type="submit" class="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition shadow-lg flex items-center justify-center gap-2">
-          <span>⚡ استخراج المتجه وحفظ الذكرى في الهاتف</span>
-        </button>
-      </form>
+        <button onclick="analyzeSelectedGallery()" class="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition shadow-lg">⚡ حلل الصور وسجل المعلومات محلياً</button>
+        <p id="gallery-status" class="text-[11px] text-amber-300 min-h-4"></p>
 
-      <div id="vector-success-box" class="mt-6 hidden bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 text-xs font-mono text-emerald-300">
-        <div class="flex items-center gap-2 font-bold mb-1">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-          تمت الفهرسة المحلية بنجاح!
+        <div class="border-t border-white/10 pt-4">
+          <h3 class="text-sm font-bold text-white mb-2">🔔 تذكير حسب النهار</h3>
+          <p class="text-[11px] text-gray-500 mb-3">اختار نهار باش يذكرك التطبيق تشوف الصور وتفتكر شنو وقع فيها.</p>
+          <div class="grid grid-cols-2 gap-2">
+            <input id="gallery-reminder-date" type="date" class="bg-[#1b1c22] border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none">
+            <input id="gallery-reminder-text" type="text" placeholder="مثال: ذكرى العيد" class="bg-[#1b1c22] border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none">
+          </div>
+          <button onclick="setGalleryReminder()" class="w-full mt-2 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 font-bold text-xs">سجل التذكير للصور المفهرسة</button>
+          <p id="gallery-reminder-badge" class="text-[11px] text-emerald-300 mt-2"></p>
         </div>
-        <p id="vector-success-details" class="text-gray-300 text-[11px]"></p>
+      </div>
+
+      <div class="mt-6 border-t border-white/10 pt-4">
+        <div class="flex justify-between items-center mb-3"><h3 class="text-sm font-bold text-white">نتائج التحليل</h3><span id="gallery-count" class="text-[11px] text-gray-500"></span></div>
+        <div id="gallery-results" class="space-y-2"></div>
       </div>
 
     </div>
@@ -447,6 +432,8 @@
   <!-- Scripts -->
   <script src="rag_engine.js"></script>
   <script src="live_assistant.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="gallery_engine.js"></script>
   <script>
     // Tab controller
     function setMainTab(tab) {
