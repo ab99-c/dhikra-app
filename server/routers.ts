@@ -1,7 +1,10 @@
 import { COOKIE_NAME } from "../shared/const.js";
+import { z } from "zod";
+import type { AssistantMemoryContext } from "@/shared/assistant";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
+import { answerWithDhikra } from "./assistant";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -15,6 +18,28 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+  }),
+
+  assistant: router({
+    chat: publicProcedure
+      .input(
+        z.object({
+          query: z.string().trim().min(1).max(2000),
+          memories: z.array(
+            z.object({
+              id: z.number(),
+              title: z.string().nullable(),
+              rawText: z.string().nullable(),
+              ocrText: z.string().nullable(),
+              theme: z.string(),
+              capturedAt: z.string(),
+              status: z.string(),
+              scheduledFor: z.string().nullable(),
+            }),
+          ).max(12).default([]),
+        }),
+      )
+      .mutation(({ input }) => answerWithDhikra(input.query, input.memories as AssistantMemoryContext[])),
   }),
 
   // TODO: add feature routers here, e.g.

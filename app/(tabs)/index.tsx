@@ -31,6 +31,8 @@ import {
   USER_DELAY_OPTIONS,
 } from "@/shared/content-library";
 import { useColors } from "@/hooks/use-colors";
+import { trpc } from "@/lib/trpc";
+import type { AssistantResponse } from "@/shared/assistant";
 
 const QUICK_PROMPTS = ["فين الصورة ديال العيد؟", "جبد ليا الاقتباسات", "شنو خاصني نعاود نشوف؟"];
 
@@ -44,6 +46,10 @@ export default function HomeScreen() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatQuery, setChatQuery] = useState("");
+  const [chatAnswer, setChatAnswer] = useState<AssistantResponse | null>(null);
+  const chatMutation = trpc.assistant.chat.useMutation();
 
   const refresh = useCallback(async (nextQuery = query) => {
     const [nextItems, nextTotal] = await Promise.all([
@@ -97,6 +103,31 @@ export default function HomeScreen() {
       Alert.alert("ما تسجلاتش", "عاود المحاولة من فضلك.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const askAssistant = async () => {
+    const question = chatQuery.trim();
+    if (!question || chatMutation.isPending) return;
+    try {
+      const matchingMemories = await listContentLibrary(question);
+      const context = matchingMemories.length > 0 ? matchingMemories : await listContentLibrary("");
+      const answer = await chatMutation.mutateAsync({
+        query: question,
+        memories: context.slice(0, 12).map(({ id, title, rawText, ocrText, theme, capturedAt, status, scheduledFor }) => ({
+          id,
+          title,
+          rawText,
+          ocrText,
+          theme,
+          capturedAt,
+          status,
+          scheduledFor,
+        })),
+      });
+      setChatAnswer(answer);
+    } catch {
+      Alert.alert("الشات ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
     }
   };
 
@@ -157,6 +188,42 @@ export default function HomeScreen() {
                   </Pressable>
                 ))}
               </View>
+
+              <Pressable
+                onPress={() => setChatOpen((value) => !value)}
+                style={({ pressed }) => [styles.chatToggle, { backgroundColor: colors.primary }, pressed && styles.pressed]}
+              >
+                <Text style={styles.chatToggleText}>{chatOpen ? "سد chatbot" : "سول ذِكْرى على شي حاجة"}</Text>
+                <Text style={styles.chatToggleIcon}>✦</Text>
+              </Pressable>
+
+              {chatOpen && (
+                <View style={[styles.chatCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Text style={[styles.chatTitle, { color: colors.foreground }]}>Chatbot بالدارجة + RAG</Text>
+                  <Text style={[styles.chatHint, { color: colors.muted }]}>يبحث فذكرياتك المختارة ويفهم أسئلة بحال: «وقتاش نعاود نشوف هادشي؟»</Text>
+                  <View style={styles.chatComposer}>
+                    <TextInput
+                      value={chatQuery}
+                      onChangeText={setChatQuery}
+                      placeholder="مثال: فاش نعاود نشوف هاد المقال؟"
+                      placeholderTextColor={colors.muted}
+                      style={[styles.chatInput, { color: colors.foreground, borderColor: colors.border }]}
+                      textAlign="right"
+                      multiline
+                    />
+                    <Pressable onPress={askAssistant} disabled={!chatQuery.trim() || chatMutation.isPending} style={[styles.chatSend, { backgroundColor: colors.primary }]}>
+                      {chatMutation.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.chatSendText}>سول</Text>}
+                    </Pressable>
+                  </View>
+                  {chatAnswer && (
+                    <View style={[styles.answerBox, { borderColor: `${colors.primary}55` }]}>
+                      <Text style={[styles.answerText, { color: colors.foreground }]}>{chatAnswer.reply}</Text>
+                      {chatAnswer.dateIso && <Text style={[styles.answerDate, { color: colors.primary }]}>التاريخ المقترح: {chatAnswer.dateText || chatAnswer.dateIso}</Text>}
+                      {chatAnswer.intent === "create_reminder" && <Text style={[styles.answerDate, { color: colors.success }]}>فهمت بلي بغيتي تذكير: {chatAnswer.reminderTitle || "ذكرى"}</Text>}
+                    </View>
+                  )}
+                </View>
+              )}
 
               <View style={[styles.captureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <View style={styles.cardHeadingRow}>
@@ -297,6 +364,19 @@ const styles = StyleSheet.create({
   promptRow: { flexDirection: "row-reverse", gap: 7, marginBottom: 18 },
   prompt: { borderWidth: 1, borderRadius: 14, paddingVertical: 7, paddingHorizontal: 10 },
   promptText: { fontSize: 11, fontWeight: "700" },
+  chatToggle: { borderRadius: 15, minHeight: 44, paddingHorizontal: 14, flexDirection: "row-reverse", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 12 },
+  chatToggleText: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  chatToggleIcon: { color: "#fff", fontSize: 17 },
+  chatCard: { borderWidth: 1, borderRadius: 20, padding: 14, marginBottom: 16 },
+  chatTitle: { fontSize: 15, fontWeight: "800", textAlign: "right" },
+  chatHint: { fontSize: 11, lineHeight: 17, textAlign: "right", marginTop: 5, marginBottom: 10 },
+  chatComposer: { flexDirection: "row-reverse", alignItems: "flex-end", gap: 8 },
+  chatInput: { flex: 1, minHeight: 48, maxHeight: 100, borderWidth: 1, borderRadius: 13, padding: 10, fontSize: 12, textAlignVertical: "top" },
+  chatSend: { minHeight: 44, minWidth: 58, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  chatSendText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  answerBox: { borderWidth: 1, borderRadius: 14, padding: 10, marginTop: 10 },
+  answerText: { fontSize: 13, lineHeight: 20, textAlign: "right" },
+  answerDate: { fontSize: 11, fontWeight: "700", textAlign: "right", marginTop: 7 },
   captureCard: { borderWidth: 1, borderRadius: 22, padding: 16, marginBottom: 24 },
   cardHeadingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   cardTitle: { fontSize: 16, fontWeight: "800", textAlign: "right" },
