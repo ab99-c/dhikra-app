@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 
 import { ScreenContainer } from "@/components/screen-container";
 import {
@@ -33,6 +34,7 @@ import {
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import type { AssistantResponse } from "@/shared/assistant";
+import { scheduleDhikraReminder } from "@/lib/reminders";
 
 const QUICK_PROMPTS = ["فين الصورة ديال العيد؟", "جبد ليا الاقتباسات", "شنو خاصني نعاود نشوف؟"];
 
@@ -41,6 +43,7 @@ export default function HomeScreen() {
   const [items, setItems] = useState<ContentLibraryItem[]>([]);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
+  const [linkDraft, setLinkDraft] = useState("");
   const [theme, setTheme] = useState<ContentTheme>("other");
   const [delay, setDelay] = useState<UserDelayPreference>("decide_for_me");
   const [total, setTotal] = useState(0);
@@ -49,6 +52,7 @@ export default function HomeScreen() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatQuery, setChatQuery] = useState("");
   const [chatAnswer, setChatAnswer] = useState<AssistantResponse | null>(null);
+  const [savingReminder, setSavingReminder] = useState(false);
   const chatMutation = trpc.assistant.chat.useMutation();
 
   const refresh = useCallback(async (nextQuery = query) => {
@@ -128,6 +132,93 @@ export default function HomeScreen() {
       setChatAnswer(answer);
     } catch {
       Alert.alert("الشات ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
+    }
+  };
+
+  const saveReminder = async () => {
+    if (!chatAnswer?.dateIso || savingReminder) return;
+    setSavingReminder(true);
+    try {
+      const id = await insertContentLibraryItem({
+        userId: "local-user",
+        sourceType: "chat_reminder",
+        sourceUri: null,
+        title: chatAnswer.reminderTitle || chatQuery.slice(0, 48),
+        rawText: chatQuery,
+        ocrText: null,
+        imageContextTags: ["reminder", "chat"],
+        theme: "other",
+        capturedAt: new Date().toISOString(),
+        status: "queued",
+        userDelayPref: "decide_for_me",
+        scheduledFor: chatAnswer.dateIso,
+      });
+      await scheduleDhikraReminder({
+        title: "ذِكْرى — وقت المراجعة",
+        body: chatAnswer.reminderTitle || chatQuery,
+        dateIso: chatAnswer.dateIso,
+        memoryId: id,
+      });
+      await refresh(query);
+      Alert.alert("تسجّل التذكير", "غادي يوصلك إشعار فـ الوقت اللي فهمو chatbot.");
+    } catch (error) {
+      Alert.alert("ما قدرناش نبرمجوه", error instanceof Error ? error.message : "عاود المحاولة من بعد.");
+    } finally {
+      setSavingReminder(false);
+    }
+  };
+
+  const pickGalleryImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    await insertContentLibraryItem({
+      userId: "local-user",
+      sourceType: "gallery_image",
+      sourceUri: asset.uri,
+      title: asset.fileName || "صورة من المعرض",
+      rawText: `صورة من المعرض: ${asset.fileName || "بدون اسم"}`,
+      ocrText: null,
+      imageContextTags: ["image", "gallery", asset.type || "photo"],
+      theme: "other",
+      capturedAt: new Date().toISOString(),
+      status: "captured",
+      userDelayPref: "decide_for_me",
+      scheduledFor: null,
+    });
+    await refresh(query);
+  };
+
+  const saveLink = async () => {
+    const url = linkDraft.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      Alert.alert("الرابط ناقص", "دخل رابط كيبدا بـ https://");
+      return;
+    }
+    try {
+      const parsed = new URL(url);
+      await insertContentLibraryItem({
+        userId: "local-user",
+        sourceType: "link",
+        sourceUri: url,
+        title: parsed.hostname.replace(/^www\./, ""),
+        rawText: url,
+        ocrText: null,
+        imageContextTags: ["link", parsed.hostname],
+        theme: "article",
+        capturedAt: new Date().toISOString(),
+        status: "captured",
+        userDelayPref: "decide_for_me",
+        scheduledFor: null,
+      });
+      setLinkDraft("");
+      await refresh(query);
+    } catch {
+      Alert.alert("الرابط غير صالح", "تأكد من الرابط وعاود المحاولة.");
     }
   };
 
@@ -220,6 +311,9 @@ export default function HomeScreen() {
                       <Text style={[styles.answerText, { color: colors.foreground }]}>{chatAnswer.reply}</Text>
                       {chatAnswer.dateIso && <Text style={[styles.answerDate, { color: colors.primary }]}>التاريخ المقترح: {chatAnswer.dateText || chatAnswer.dateIso}</Text>}
                       {chatAnswer.intent === "create_reminder" && <Text style={[styles.answerDate, { color: colors.success }]}>فهمت بلي بغيتي تذكير: {chatAnswer.reminderTitle || "ذكرى"}</Text>}
+                      {chatAnswer.dateIso && <Pressable onPress={saveReminder} disabled={savingReminder} style={[styles.reminderButton, { backgroundColor: colors.primary }]}>
+                        {savingReminder ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.reminderButtonText}>برمج التذكير</Text>}
+                      </Pressable>}
                     </View>
                   )}
                 </View>
@@ -239,6 +333,26 @@ export default function HomeScreen() {
                   multiline
                   textAlign="right"
                 />
+                <View style={styles.captureActions}>
+                  <Pressable onPress={pickGalleryImage} style={[styles.secondaryButton, { borderColor: colors.primary }]}>
+                    <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>اختار صورة</Text>
+                  </Pressable>
+                  <View style={styles.linkComposer}>
+                    <TextInput
+                      value={linkDraft}
+                      onChangeText={setLinkDraft}
+                      placeholder="https://..."
+                      placeholderTextColor={colors.muted}
+                      style={[styles.linkInput, { color: colors.foreground, borderColor: colors.border }]}
+                      autoCapitalize="none"
+                      keyboardType="url"
+                      textAlign="right"
+                    />
+                    <Pressable onPress={saveLink} style={[styles.linkButton, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.linkButtonText}>حفظ رابط</Text>
+                    </Pressable>
+                  </View>
+                </View>
                 <View style={styles.sectionLabelRow}>
                   <Text style={[styles.sectionLabel, { color: colors.muted }]}>التصنيف</Text>
                   <Text style={[styles.sectionLabel, { color: colors.muted }]}>وقت الرجوع</Text>
@@ -377,11 +491,20 @@ const styles = StyleSheet.create({
   answerBox: { borderWidth: 1, borderRadius: 14, padding: 10, marginTop: 10 },
   answerText: { fontSize: 13, lineHeight: 20, textAlign: "right" },
   answerDate: { fontSize: 11, fontWeight: "700", textAlign: "right", marginTop: 7 },
+  reminderButton: { minHeight: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", marginTop: 10 },
+  reminderButtonText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   captureCard: { borderWidth: 1, borderRadius: 22, padding: 16, marginBottom: 24 },
   cardHeadingRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   cardTitle: { fontSize: 16, fontWeight: "800", textAlign: "right" },
   cardEmoji: { color: "#F59E0B", fontSize: 20 },
   noteInput: { borderWidth: 1, borderRadius: 14, padding: 12, minHeight: 72, fontSize: 13, textAlignVertical: "top", marginBottom: 14 },
+  captureActions: { gap: 9, marginBottom: 13 },
+  secondaryButton: { borderWidth: 1, borderRadius: 12, minHeight: 38, alignItems: "center", justifyContent: "center" },
+  secondaryButtonText: { fontSize: 12, fontWeight: "800" },
+  linkComposer: { flexDirection: "row-reverse", gap: 7 },
+  linkInput: { flex: 1, minHeight: 40, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, fontSize: 12 },
+  linkButton: { minWidth: 76, minHeight: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  linkButtonText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   sectionLabelRow: { flexDirection: "row-reverse", justifyContent: "space-between", marginBottom: 7 },
   sectionLabel: { fontSize: 11, fontWeight: "700" },
   optionRow: { marginBottom: 10 },
