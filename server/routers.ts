@@ -5,6 +5,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { answerWithDhikra } from "./assistant";
+import { analyzeImageBase64 } from "./_core/imageAnalysis";
 
 export const appRouter = router({
   // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -40,6 +41,17 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => answerWithDhikra(input.query, input.memories as AssistantMemoryContext[])),
+  }),
+
+  content: router({
+    analyzeImage: publicProcedure
+      .input(
+        z.object({
+          base64: z.string().min(1),
+          mimeType: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) => analyzeImageBase64(input.base64, input.mimeType)),
   }),
 
   // TODO: add feature routers here, e.g.
