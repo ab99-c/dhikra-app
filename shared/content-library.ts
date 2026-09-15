@@ -26,6 +26,8 @@ export type ContentLibraryItem = {
   rawText: string | null;
   ocrText: string | null;
   imageContextTags: string[];
+  /** Privacy-first local vector used for semantic search; never leaves the device. */
+  embedding?: number[];
   theme: ContentTheme;
   capturedAt: string;
   status: ContentStatus;

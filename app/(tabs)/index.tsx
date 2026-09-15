@@ -25,6 +25,7 @@ import {
   insertContentLibraryItem,
   listContentLibrary,
   markContentRevisited,
+  updateContentMetadata,
 } from "@/lib/content-library";
 import {
   readScreenshotBase64,
@@ -47,6 +48,7 @@ import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import type { AssistantResponse } from "@/shared/assistant";
 import { scheduleDhikraReminder } from "@/lib/reminders";
+import type { ImageAnalysis } from "@/server/_core/imageAnalysis";
 
 const QUICK_PROMPTS = ["فين الصورة ديال العيد؟", "جبد ليا الاقتباسات", "شنو خاصني نعاود نشوف؟"];
 
@@ -68,6 +70,10 @@ export default function HomeScreen() {
   const [shots, setShots] = useState<DetectedScreenshot[]>([]);
   const [shotsLoading, setShotsLoading] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [pendingAnalysis, setPendingAnalysis] = useState<{ uri: string; filename: string; analysis: ImageAnalysis } | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTags, setEditTags] = useState("");
+  const [editTheme, setEditTheme] = useState<ContentTheme>("other");
   const chatMutation = trpc.assistant.chat.useMutation();
   const analyzeMutation = trpc.content.analyzeImage.useMutation();
 
@@ -317,6 +323,18 @@ export default function HomeScreen() {
     try {
       const { base64, mimeType } = await readImageUriBase64(asset.uri);
       const analysis = await analyzeMutation.mutateAsync({ base64, mimeType });
+      setPendingAnalysis({ uri: asset.uri, filename: asset.fileName || "صورة من المعرض", analysis });
+    } catch {
+      Alert.alert("التحليل ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
+  const savePendingImage = async () => {
+    if (!pendingAnalysis) return;
+    const { uri, filename, analysis } = pendingAnalysis;
+    try {
       const existing = await listContentLibrary("");
       const scheduledFor = analysis.suggestedDelay === "decide_for_me"
         ? planNextReminder(existing, new Date()).scheduledForIso
@@ -324,8 +342,8 @@ export default function HomeScreen() {
       const id = await insertContentLibraryItem({
         userId: "local-user",
         sourceType: "gallery_image",
-        sourceUri: asset.uri,
-        title: analysis.title || asset.fileName || "صورة من المعرض",
+        sourceUri: uri,
+        title: analysis.title || filename,
         rawText: analysis.summary || analysis.ocrText,
         ocrText: analysis.ocrText,
         imageContextTags: [...analysis.tags, "image", "gallery"],
@@ -342,11 +360,10 @@ export default function HomeScreen() {
         memoryId: id,
       }).then((notificationId) => attachNotificationToItem(id, notificationId));
       await refresh(query);
-      Alert.alert("تفهمات الصورة", analysis.summary || analysis.title || "تزادت الصورة للمكتبة.");
+      setPendingAnalysis(null);
+      Alert.alert("تحفظات الصورة", analysis.summary || analysis.title || "تزادت الصورة للمكتبة.");
     } catch {
-      Alert.alert("التحليل ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
-    } finally {
-      setAnalyzingId(null);
+      Alert.alert("ما تحفظاتش الصورة", "عاود المحاولة من فضلك.");
     }
   };
 
@@ -377,6 +394,22 @@ export default function HomeScreen() {
     } catch {
       Alert.alert("الرابط غير صالح", "تأكد من الرابط وعاود المحاولة.");
     }
+  };
+
+  const beginEditMetadata = (item: ContentLibraryItem) => {
+    setEditingId(item.id);
+    setEditTheme(item.theme);
+    setEditTags(item.imageContextTags.join(", "));
+  };
+
+  const saveMetadata = async () => {
+    if (editingId === null) return;
+    await updateContentMetadata(editingId, {
+      theme: editTheme,
+      imageContextTags: editTags.split(",").map((tag) => tag.trim()).filter(Boolean).slice(0, 12),
+    });
+    setEditingId(null);
+    await refresh(query);
   };
 
   const subtitle = useMemo(
@@ -510,6 +543,29 @@ export default function HomeScreen() {
                     </Pressable>
                   </View>
                 </View>
+                {analyzingId === "gallery" && (
+                  <View style={[styles.analysisPreview, { borderColor: colors.primary }]}>
+                    <ActivityIndicator color={colors.primary} />
+                    <Text style={[styles.previewHint, { color: colors.muted }]}>كنفهمو الصورة بالذكاء الاصطناعي...</Text>
+                  </View>
+                )}
+                {pendingAnalysis && (
+                  <View style={[styles.analysisPreview, { borderColor: colors.primary, backgroundColor: `${colors.primary}0d` }]}>
+                    <Text style={[styles.previewEyebrow, { color: colors.primary }]}>Preview قبل الحفظ</Text>
+                    <Text style={[styles.previewTitle, { color: colors.foreground }]}>{pendingAnalysis.analysis.title || pendingAnalysis.filename}</Text>
+                    <Text style={[styles.previewSummary, { color: colors.foreground }]}>{pendingAnalysis.analysis.summary || "ما خرج حتى summary واضح."}</Text>
+                    <Text style={[styles.previewMeta, { color: colors.muted }]}>OCR: {pendingAnalysis.analysis.ocrText.slice(0, 180) || "ما كاينش نص واضح"}</Text>
+                    <Text style={[styles.previewMeta, { color: colors.primary }]}>#{pendingAnalysis.analysis.tags.join(" #") || "بدون tags"}</Text>
+                    <View style={styles.previewActions}>
+                      <Pressable onPress={() => setPendingAnalysis(null)} style={[styles.previewCancel, { borderColor: colors.border }]}>
+                        <Text style={[styles.previewCancelText, { color: colors.muted }]}>إلغاء</Text>
+                      </Pressable>
+                      <Pressable onPress={savePendingImage} style={[styles.previewSave, { backgroundColor: colors.primary }]}>
+                        <Text style={styles.previewSaveText}>حفظ وتحضير التذكير</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
                 <View style={styles.sectionLabelRow}>
                   <Text style={[styles.sectionLabel, { color: colors.muted }]}>التصنيف</Text>
                   <Text style={[styles.sectionLabel, { color: colors.muted }]}>وقت الرجوع</Text>
@@ -654,6 +710,32 @@ export default function HomeScreen() {
                 <Text style={[styles.memoryMeta, { color: colors.muted }]}>
                   {item.revisitCount > 0 ? `رجعتي ليها ${item.revisitCount} مرات` : delayLabel[item.userDelayPref]}
                 </Text>
+                {editingId === item.id ? (
+                  <View style={styles.editPanel}>
+                    <TextInput
+                      value={editTags}
+                      onChangeText={setEditTags}
+                      placeholder="tags مفصولين بفاصلة"
+                      placeholderTextColor={colors.muted}
+                      style={[styles.editInput, { color: colors.foreground, borderColor: colors.border }]}
+                      textAlign="right"
+                    />
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editThemeRow}>
+                      {CONTENT_THEMES.map((value) => (
+                        <Pressable key={value} onPress={() => setEditTheme(value)} style={[styles.editTheme, { borderColor: editTheme === value ? colors.primary : colors.border }]}>
+                          <Text style={[styles.editThemeText, { color: editTheme === value ? colors.primary : colors.muted }]}>{themeLabel[value]}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                    <Pressable onPress={saveMetadata} style={[styles.editSave, { backgroundColor: colors.primary }]}>
+                      <Text style={styles.editSaveText}>حفظ التعديلات</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable onPress={() => beginEditMetadata(item)} style={styles.editTrigger}>
+                    <Text style={[styles.editTriggerText, { color: colors.primary }]}>عدّل tags والتصنيف</Text>
+                  </Pressable>
+                )}
               </View>
             </Pressable>
           )}
@@ -699,6 +781,17 @@ const styles = StyleSheet.create({
   cardEmoji: { color: "#F59E0B", fontSize: 20 },
   noteInput: { borderWidth: 1, borderRadius: 14, padding: 12, minHeight: 72, fontSize: 13, textAlignVertical: "top", marginBottom: 14 },
   captureActions: { gap: 9, marginBottom: 13 },
+  analysisPreview: { borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 13, gap: 7 },
+  previewEyebrow: { fontSize: 10, fontWeight: "900", textAlign: "right" },
+  previewTitle: { fontSize: 15, fontWeight: "800", textAlign: "right" },
+  previewSummary: { fontSize: 13, lineHeight: 20, textAlign: "right" },
+  previewMeta: { fontSize: 10, lineHeight: 16, textAlign: "right" },
+  previewHint: { fontSize: 11, textAlign: "center" },
+  previewActions: { flexDirection: "row-reverse", gap: 8, marginTop: 4 },
+  previewCancel: { flex: 1, minHeight: 38, borderWidth: 1, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  previewCancelText: { fontSize: 12, fontWeight: "700" },
+  previewSave: { flex: 2, minHeight: 38, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  previewSaveText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   secondaryButton: { borderWidth: 1, borderRadius: 12, minHeight: 38, alignItems: "center", justifyContent: "center" },
   secondaryButtonText: { fontSize: 12, fontWeight: "800" },
   linkComposer: { flexDirection: "row-reverse", gap: 7 },
@@ -731,6 +824,15 @@ const styles = StyleSheet.create({
   memoryTitle: { fontSize: 14, fontWeight: "800", width: "100%", textAlign: "right" },
   memoryText: { fontSize: 12, lineHeight: 18, width: "100%", textAlign: "right", marginTop: 4 },
   memoryMeta: { fontSize: 10, width: "100%", textAlign: "right", marginTop: 5 },
+  editTrigger: { marginTop: 7, alignSelf: "flex-end" },
+  editTriggerText: { fontSize: 10, fontWeight: "800" },
+  editPanel: { width: "100%", gap: 7, marginTop: 8 },
+  editInput: { borderWidth: 1, borderRadius: 10, minHeight: 34, paddingHorizontal: 9, fontSize: 11 },
+  editThemeRow: { gap: 6, paddingVertical: 2 },
+  editTheme: { borderWidth: 1, borderRadius: 9, paddingVertical: 5, paddingHorizontal: 7 },
+  editThemeText: { fontSize: 9, fontWeight: "700" },
+  editSave: { minHeight: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  editSaveText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   empty: { paddingVertical: 24 },
   emptyText: { textAlign: "center", paddingVertical: 24, fontSize: 13 },
   pressed: { opacity: 0.75, transform: [{ scale: 0.99 }] },

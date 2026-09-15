@@ -1,6 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 import { matchesNormalized } from "@/shared/darija";
+import { contentSearchText, cosineSimilarity, createLocalEmbedding } from "@/shared/semantic-search";
 import type {
   ContentLibraryItem,
   ContentStatus,
@@ -52,6 +53,7 @@ export async function initializeContentLibrary() {
       raw_text TEXT,
       ocr_text TEXT,
       image_context_tags TEXT NOT NULL DEFAULT '[]',
+      embedding TEXT,
       theme TEXT NOT NULL DEFAULT 'other',
       captured_at TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'captured',
@@ -68,6 +70,9 @@ export async function initializeContentLibrary() {
   const columns = await db.getAllAsync<{ name: string }>("PRAGMA table_info(content_library)");
   if (!columns.some((column) => column.name === "notification_id")) {
     await db.execAsync("ALTER TABLE content_library ADD COLUMN notification_id TEXT");
+  }
+  if (!columns.some((column) => column.name === "embedding")) {
+    await db.execAsync("ALTER TABLE content_library ADD COLUMN embedding TEXT");
   }
   const result = await db.getFirstAsync<{ count: number }>("SELECT COUNT(*) AS count FROM content_library");
   if ((result?.count ?? 0) === 0) {
@@ -94,6 +99,7 @@ function mapRow(row: Record<string, unknown>): ContentLibraryItem {
     rawText: row.raw_text ? String(row.raw_text) : null,
     ocrText: row.ocr_text ? String(row.ocr_text) : null,
     imageContextTags: JSON.parse(String(row.image_context_tags || "[]")) as string[],
+    embedding: row.embedding ? JSON.parse(String(row.embedding)) as number[] : undefined,
     theme: String(row.theme) as ContentTheme,
     capturedAt: String(row.captured_at),
     status: String(row.status) as ContentStatus,
@@ -113,15 +119,21 @@ export async function listContentLibrary(query = "") {
     "SELECT * FROM content_library ORDER BY captured_at DESC",
   );
   if (!normalized) return rows.map(mapRow);
-  // Arabic/Darija spelling varies too much for SQL LIKE, so filter in JS
+  // Arabic/Darija spelling varies too much for SQL LIKE, so rank in JS
   // after normalizing both sides (library sizes are personal-scale).
+  const queryVector = createLocalEmbedding(normalized);
   return rows
     .map(mapRow)
-    .filter((item) =>
-      [item.title, item.rawText, item.ocrText, item.theme]
+    .map((item) => {
+      const lexical = [item.title, item.rawText, item.ocrText, item.theme, ...item.imageContextTags]
         .filter(Boolean)
-        .some((value) => matchesNormalized(String(value), normalized)),
-    );
+        .some((value) => matchesNormalized(String(value), normalized));
+      const semantic = cosineSimilarity(item.embedding || createLocalEmbedding(contentSearchText(item)), queryVector);
+      return { item, score: (lexical ? 1 : 0) + semantic };
+    })
+    .filter(({ score }) => score >= 0.12)
+    .sort((a, b) => b.score - a.score)
+    .map(({ item }) => item);
 }
 
 export async function insertContentLibraryItem(input: NewContentLibraryItem) {
@@ -129,12 +141,12 @@ export async function insertContentLibraryItem(input: NewContentLibraryItem) {
   const now = new Date().toISOString();
   const result = await db.runAsync(
     `INSERT INTO content_library
-      (user_id, source_type, source_uri, title, raw_text, ocr_text, image_context_tags,
+      (user_id, source_type, source_uri, title, raw_text, ocr_text, image_context_tags, embedding,
        theme, captured_at, status, user_delay_pref, scheduled_for, notification_id,
        revisit_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.userId, input.sourceType, input.sourceUri, input.title, input.rawText, input.ocrText,
-    JSON.stringify(input.imageContextTags), input.theme, input.capturedAt, input.status,
+    JSON.stringify(input.imageContextTags), JSON.stringify(input.embedding || createLocalEmbedding(contentSearchText(input))), input.theme, input.capturedAt, input.status,
     input.userDelayPref, input.scheduledFor, input.notificationId ?? null,
     input.revisitCount ?? 0, now, now,
   );
@@ -167,6 +179,21 @@ export async function updateContentSchedule(id: number, scheduledFor: string) {
   await db.runAsync(
     "UPDATE content_library SET scheduled_for = ?, updated_at = ? WHERE id = ?",
     scheduledFor, new Date().toISOString(), id,
+  );
+}
+
+export async function updateContentMetadata(id: number, metadata: { theme: ContentTheme; imageContextTags: string[] }) {
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<Record<string, unknown>>("SELECT * FROM content_library WHERE id = ?", id);
+  if (!row) return;
+  const item = mapRow(row);
+  await db.runAsync(
+    "UPDATE content_library SET theme = ?, image_context_tags = ?, embedding = ?, updated_at = ? WHERE id = ?",
+    metadata.theme,
+    JSON.stringify(metadata.imageContextTags),
+    JSON.stringify(createLocalEmbedding(contentSearchText({ ...item, ...metadata }))),
+    new Date().toISOString(),
+    id,
   );
 }
 
