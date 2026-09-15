@@ -71,3 +71,19 @@ export async function readScreenshotBase64(
   });
   return { base64, mimeType };
 }
+
+export async function readImageUriBase64(uri: string): Promise<{ base64: string; mimeType: string }> {
+  const mimeType = /\.png($|\?)/i.test(uri) ? "image/png" : "image/jpeg";
+  if (Platform.OS !== "web") {
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { base64, mimeType };
+  }
+  const response = await fetch(uri);
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return { base64: btoa(binary), mimeType: response.headers.get("content-type") || mimeType };
+}

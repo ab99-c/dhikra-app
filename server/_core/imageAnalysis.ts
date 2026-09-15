@@ -11,6 +11,7 @@ import { CONTENT_THEMES, USER_DELAY_OPTIONS, type ContentTheme, type UserDelayPr
 
 export type ImageAnalysis = {
   title: string;
+  summary: string;
   ocrText: string;
   contentType: "hadith" | "dhikr" | "video" | "post" | "article" | "other";
   theme: ContentTheme;
@@ -26,6 +27,7 @@ const imageAnalysisSchema = {
     type: "object",
     properties: {
       title: { type: "string" },
+      summary: { type: "string" },
       ocrText: { type: "string" },
       contentType: { type: "string", enum: ["hadith", "dhikr", "video", "post", "article", "other"] },
       theme: { type: "string", enum: [...CONTENT_THEMES] },
@@ -33,7 +35,7 @@ const imageAnalysisSchema = {
       suggestedDelay: { type: "string", enum: [...USER_DELAY_OPTIONS] },
       confidence: { type: "number" },
     },
-    required: ["title", "ocrText", "contentType", "theme", "tags", "suggestedDelay", "confidence"],
+    required: ["title", "summary", "ocrText", "contentType", "theme", "tags", "suggestedDelay", "confidence"],
     additionalProperties: false,
   },
 } as const;
@@ -46,6 +48,7 @@ function responseText(content: string | { type: string; text?: string }[]): stri
 export function parseImageAnalysis(raw: string): ImageAnalysis {
   const fallback: ImageAnalysis = {
     title: "",
+    summary: "",
     ocrText: "",
     contentType: "other",
     theme: "other",
@@ -59,6 +62,7 @@ export function parseImageAnalysis(raw: string): ImageAnalysis {
     const validDelays = new Set<string>(USER_DELAY_OPTIONS);
     return {
       title: typeof parsed.title === "string" ? parsed.title.slice(0, 120) : fallback.title,
+      summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 300) : fallback.summary,
       ocrText: typeof parsed.ocrText === "string" ? parsed.ocrText : fallback.ocrText,
       contentType: typeof parsed.contentType === "string" ? (parsed.contentType as ImageAnalysis["contentType"]) : fallback.contentType,
       theme: validThemes.has(parsed.theme || "") ? (parsed.theme as ContentTheme) : fallback.theme,
@@ -79,7 +83,7 @@ export async function analyzeImageBase64(base64: string, mimeType = "image/jpeg"
       {
         role: "system",
         content:
-          "نتا محلل صور ديال تطبيق «ذِكْرى». شوف الصورة (غالبا سكرين شوت من هاتف مغربي) وخرج JSON فيه: title عنوان قصير بالدارجة، ocrText النص الكامل المكتوب فالصورة (النقل الحرفي قدر الإمكان)، contentType نوع المحتوى (hadith حديث / dhikr ذكر / video فيديو تعليمي / post منشور سوشيال ميديا / article مقال / other)، theme التصنيف من القائمة، tags كلمات مفتاحية (3-6) بالعربية، suggestedDelay أفضل وقت باش يرجع ليه المستخدم من القائمة، confidence الثقة 0-1.",
+          "نتا محلل صور multimodal ديال تطبيق «ذِكْرى». ما تكتفيش بـOCR: فهم المعنى والسياق والنية المحتملة علاش المستخدم حفظ الصورة. خرج JSON فيه: title عنوان قصير بالدارجة، summary جملة وحدة كتشرح المعنى والفائدة للمستخدم، ocrText النص الكامل المكتوب فالصورة (النقل الحرفي قدر الإمكان)، contentType نوع المحتوى (hadith حديث / dhikr ذكر / video فيديو تعليمي / post منشور سوشيال ميديا / article مقال / other)، theme التصنيف من القائمة، tags كلمات مفتاحية (3-6) بالعربية، suggestedDelay أفضل وقت باش يرجع ليه المستخدم من القائمة، confidence الثقة 0-1.",
       },
       {
         role: "user",

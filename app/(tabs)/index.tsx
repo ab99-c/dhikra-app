@@ -28,6 +28,7 @@ import {
 } from "@/lib/content-library";
 import {
   readScreenshotBase64,
+  readImageUriBase64,
   scanRecentScreenshots,
   type DetectedScreenshot,
 } from "@/lib/screenshots";
@@ -312,21 +313,41 @@ export default function HomeScreen() {
     });
     if (result.canceled) return;
     const asset = result.assets[0];
-    await insertContentLibraryItem({
-      userId: "local-user",
-      sourceType: "gallery_image",
-      sourceUri: asset.uri,
-      title: asset.fileName || "صورة من المعرض",
-      rawText: `صورة من المعرض: ${asset.fileName || "بدون اسم"}`,
-      ocrText: null,
-      imageContextTags: ["image", "gallery", asset.type || "photo"],
-      theme: "other",
-      capturedAt: new Date().toISOString(),
-      status: "captured",
-      userDelayPref: "decide_for_me",
-      scheduledFor: null,
-    });
-    await refresh(query);
+    setAnalyzingId("gallery");
+    try {
+      const { base64, mimeType } = await readImageUriBase64(asset.uri);
+      const analysis = await analyzeMutation.mutateAsync({ base64, mimeType });
+      const existing = await listContentLibrary("");
+      const scheduledFor = analysis.suggestedDelay === "decide_for_me"
+        ? planNextReminder(existing, new Date()).scheduledForIso
+        : new Date(Date.now() + DELAY_PRESETS_MS[analysis.suggestedDelay]).toISOString();
+      const id = await insertContentLibraryItem({
+        userId: "local-user",
+        sourceType: "gallery_image",
+        sourceUri: asset.uri,
+        title: analysis.title || asset.fileName || "صورة من المعرض",
+        rawText: analysis.summary || analysis.ocrText,
+        ocrText: analysis.ocrText,
+        imageContextTags: [...analysis.tags, "image", "gallery"],
+        theme: analysis.theme,
+        capturedAt: new Date().toISOString(),
+        status: "queued",
+        userDelayPref: analysis.suggestedDelay,
+        scheduledFor,
+      });
+      await scheduleDhikraReminder({
+        title: "ذِكْرى — وقت المراجعة",
+        body: analysis.summary || analysis.title || "صورة محللة بالذكاء الاصطناعي",
+        dateIso: scheduledFor,
+        memoryId: id,
+      }).then((notificationId) => attachNotificationToItem(id, notificationId));
+      await refresh(query);
+      Alert.alert("تفهمات الصورة", analysis.summary || analysis.title || "تزادت الصورة للمكتبة.");
+    } catch {
+      Alert.alert("التحليل ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
+    } finally {
+      setAnalyzingId(null);
+    }
   };
 
   const saveLink = async () => {
