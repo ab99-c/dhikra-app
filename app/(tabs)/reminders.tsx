@@ -20,20 +20,8 @@ import {
 } from "@/lib/content-library";
 import { scheduleDhikraReminder, cancelDhikraReminder } from "@/lib/reminders";
 import { useColors } from "@/hooks/use-colors";
+import { formatMoroccanDateTime } from "@/shared/dates";
 import type { ContentLibraryItem } from "@/shared/content-library";
-
-const MONTHS = [
-  "يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو",
-  "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر",
-];
-
-function formatDhikraDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()} · ${hours}:${minutes}`;
-}
 
 export default function RemindersScreen() {
   const colors = useColors();
@@ -178,7 +166,7 @@ export default function RemindersScreen() {
                 </Text>
               ) : null}
               <Text style={[styles.reminderDate, { color: colors.primary }]}>
-                {formatDhikraDate(item.scheduledFor || "")}
+                {formatMoroccanDateTime(item.scheduledFor || "")}
               </Text>
               <View style={styles.reminderActions}>
                 <Pressable
@@ -211,7 +199,7 @@ export default function RemindersScreen() {
                     </Text>
                     {item.scheduledFor ? (
                       <Text style={[styles.doneDate, { color: colors.muted }]}>
-                        كان مبرمج لـ {formatDhikraDate(item.scheduledFor)}
+                        كان مبرمج لـ {formatMoroccanDateTime(item.scheduledFor)}
                       </Text>
                     ) : null}
                   </View>
