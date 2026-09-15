@@ -5,3 +5,8 @@ export async function scheduleDhikraReminder(input: { title: string; body: strin
   }
   return `web-preview-${date.getTime()}`;
 }
+
+export async function cancelDhikraReminder(notificationId: string) {
+  // Web has no native scheduled notifications; the id is a preview marker.
+  return `web-cancel-${notificationId}`;
+}

@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import { ScreenContainer } from "@/components/screen-container";
 import {
+  attachNotificationToItem,
   countContentLibrary,
   initializeContentLibrary,
   insertContentLibraryItem,
@@ -158,7 +159,7 @@ export default function HomeScreen() {
         body: chatAnswer.reminderTitle || chatQuery,
         dateIso: chatAnswer.dateIso,
         memoryId: id,
-      });
+      }).then((notificationId) => attachNotificationToItem(id, notificationId));
       await refresh(query);
       Alert.alert("تسجّل التذكير", "غادي يوصلك إشعار فـ الوقت اللي فهمو chatbot.");
     } catch (error) {

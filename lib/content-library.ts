@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { matchesNormalized } from "@/shared/darija";
 import type {
   ContentLibraryItem,
   ContentStatus,
@@ -49,12 +50,12 @@ export async function initializeContentLibrary() {
 
 export async function listContentLibrary(query = "") {
   const items = await loadItems();
-  const normalized = query.trim().toLowerCase();
+  const normalized = query.trim();
   const filtered = normalized
     ? items.filter((item) =>
         [item.title, item.rawText, item.ocrText, item.theme]
           .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(normalized)),
+          .some((value) => matchesNormalized(String(value), normalized)),
       )
     : items;
   return [...filtered].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
@@ -79,6 +80,18 @@ export async function markContentRevisited(id: number) {
 export async function updateContentStatus(id: number, status: ContentStatus) {
   const items = await loadItems();
   itemsCache = items.map((item) => item.id === id ? { ...item, status, updatedAt: new Date().toISOString() } : item);
+  await saveItems();
+}
+
+export async function attachNotificationToItem(id: number, notificationId: string) {
+  const items = await loadItems();
+  itemsCache = items.map((item) => item.id === id ? { ...item, notificationId, updatedAt: new Date().toISOString() } : item);
+  await saveItems();
+}
+
+export async function updateContentSchedule(id: number, scheduledFor: string) {
+  const items = await loadItems();
+  itemsCache = items.map((item) => item.id === id ? { ...item, scheduledFor, updatedAt: new Date().toISOString() } : item);
   await saveItems();
 }
 

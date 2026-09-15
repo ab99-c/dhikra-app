@@ -43,3 +43,8 @@ export async function scheduleDhikraReminder(input: { title: string; body: strin
     },
   });
 }
+
+export async function cancelDhikraReminder(notificationId: string) {
+  await Notifications.cancelScheduledNotificationAsync(notificationId);
+  return `cancelled-${notificationId}`;
+}

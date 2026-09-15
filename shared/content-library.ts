@@ -31,6 +31,8 @@ export type ContentLibraryItem = {
   status: ContentStatus;
   userDelayPref: UserDelayPreference;
   scheduledFor: string | null;
+  /** Native notification id attached once a reminder is scheduled. */
+  notificationId?: string | null;
   revisitCount: number;
   createdAt: string;
   updatedAt: string;

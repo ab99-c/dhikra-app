@@ -1,5 +1,6 @@
 import * as SQLite from "expo-sqlite";
 
+import { matchesNormalized } from "@/shared/darija";
 import type {
   ContentLibraryItem,
   ContentStatus,
@@ -63,6 +64,11 @@ export async function initializeContentLibrary() {
     CREATE INDEX IF NOT EXISTS idx_content_library_status_schedule ON content_library(status, scheduled_for);
     CREATE INDEX IF NOT EXISTS idx_content_library_theme ON content_library(theme);
   `);
+  // Migration: attach the scheduled native notification id to an item.
+  const columns = await db.getAllAsync<{ name: string }>("PRAGMA table_info(content_library)");
+  if (!columns.some((column) => column.name === "notification_id")) {
+    await db.execAsync("ALTER TABLE content_library ADD COLUMN notification_id TEXT");
+  }
   const result = await db.getFirstAsync<{ count: number }>("SELECT COUNT(*) AS count FROM content_library");
   if ((result?.count ?? 0) === 0) {
     const item = createSeedItem();
@@ -93,6 +99,7 @@ function mapRow(row: Record<string, unknown>): ContentLibraryItem {
     status: String(row.status) as ContentStatus,
     userDelayPref: String(row.user_delay_pref) as UserDelayPreference,
     scheduledFor: row.scheduled_for ? String(row.scheduled_for) : null,
+    notificationId: row.notification_id ? String(row.notification_id) : null,
     revisitCount: Number(row.revisit_count || 0),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -102,16 +109,19 @@ function mapRow(row: Record<string, unknown>): ContentLibraryItem {
 export async function listContentLibrary(query = "") {
   const db = await getDatabase();
   const normalized = query.trim();
-  const rows = normalized
-    ? await db.getAllAsync<Record<string, unknown>>(
-        `SELECT * FROM content_library
-         WHERE COALESCE(title, '') LIKE ? OR COALESCE(raw_text, '') LIKE ?
-            OR COALESCE(ocr_text, '') LIKE ? OR theme LIKE ?
-         ORDER BY captured_at DESC`,
-        `%${normalized}%`, `%${normalized}%`, `%${normalized}%`, `%${normalized}%`,
-      )
-    : await db.getAllAsync<Record<string, unknown>>("SELECT * FROM content_library ORDER BY captured_at DESC");
-  return rows.map(mapRow);
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    "SELECT * FROM content_library ORDER BY captured_at DESC",
+  );
+  if (!normalized) return rows.map(mapRow);
+  // Arabic/Darija spelling varies too much for SQL LIKE, so filter in JS
+  // after normalizing both sides (library sizes are personal-scale).
+  return rows
+    .map(mapRow)
+    .filter((item) =>
+      [item.title, item.rawText, item.ocrText, item.theme]
+        .filter(Boolean)
+        .some((value) => matchesNormalized(String(value), normalized)),
+    );
 }
 
 export async function insertContentLibraryItem(input: NewContentLibraryItem) {
@@ -120,11 +130,13 @@ export async function insertContentLibraryItem(input: NewContentLibraryItem) {
   const result = await db.runAsync(
     `INSERT INTO content_library
       (user_id, source_type, source_uri, title, raw_text, ocr_text, image_context_tags,
-       theme, captured_at, status, user_delay_pref, scheduled_for, revisit_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       theme, captured_at, status, user_delay_pref, scheduled_for, notification_id,
+       revisit_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.userId, input.sourceType, input.sourceUri, input.title, input.rawText, input.ocrText,
     JSON.stringify(input.imageContextTags), input.theme, input.capturedAt, input.status,
-    input.userDelayPref, input.scheduledFor, input.revisitCount ?? 0, now, now,
+    input.userDelayPref, input.scheduledFor, input.notificationId ?? null,
+    input.revisitCount ?? 0, now, now,
   );
   return Number(result.lastInsertRowId);
 }
@@ -140,6 +152,22 @@ export async function markContentRevisited(id: number) {
 export async function updateContentStatus(id: number, status: ContentStatus) {
   const db = await getDatabase();
   await db.runAsync("UPDATE content_library SET status = ?, updated_at = ? WHERE id = ?", status, new Date().toISOString(), id);
+}
+
+export async function attachNotificationToItem(id: number, notificationId: string) {
+  const db = await getDatabase();
+  await db.runAsync(
+    "UPDATE content_library SET notification_id = ?, updated_at = ? WHERE id = ?",
+    notificationId, new Date().toISOString(), id,
+  );
+}
+
+export async function updateContentSchedule(id: number, scheduledFor: string) {
+  const db = await getDatabase();
+  await db.runAsync(
+    "UPDATE content_library SET scheduled_for = ?, updated_at = ? WHERE id = ?",
+    scheduledFor, new Date().toISOString(), id,
+  );
 }
 
 export async function countContentLibrary() {

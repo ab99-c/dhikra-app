@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS content_library (
   status TEXT NOT NULL DEFAULT 'captured',
   user_delay_pref TEXT NOT NULL DEFAULT 'decide_for_me',
   scheduled_for TEXT,
+  notification_id TEXT,
   revisit_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

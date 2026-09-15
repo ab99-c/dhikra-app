@@ -42,6 +42,7 @@ export const contentLibrary = mysqlTable("content_library", {
   status: mysqlEnum("status", CONTENT_STATUSES).default("captured").notNull(),
   userDelayPref: mysqlEnum("userDelayPref", USER_DELAY_OPTIONS).default("decide_for_me").notNull(),
   scheduledFor: timestamp("scheduledFor"),
+  notificationId: text("notificationId"),
   revisitCount: int("revisitCount").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
