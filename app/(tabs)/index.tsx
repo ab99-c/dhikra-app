@@ -31,6 +31,7 @@ import {
   scanRecentScreenshots,
   type DetectedScreenshot,
 } from "@/lib/screenshots";
+import { subscribeToScreenshots } from "@/lib/screenshot-watcher";
 import { DELAY_PRESETS_MS, planNextReminder } from "@/shared/timing-engine";
 import {
   CONTENT_THEMES,
@@ -95,6 +96,16 @@ export default function HomeScreen() {
       refreshScreenshots();
     }, [refreshScreenshots]),
   );
+
+  // Native watcher (dev builds): re-scan as soon as a new screenshot lands,
+  // even when the user comes back from another app.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const unsubscribe = subscribeToScreenshots(() => {
+      refreshScreenshots();
+    });
+    return () => unsubscribe?.();
+  }, [refreshScreenshots]);
 
   useEffect(() => {
     let mounted = true;

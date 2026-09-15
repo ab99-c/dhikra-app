@@ -79,7 +79,17 @@ VITE_APP_ID= / OWNER_OPEN_ID=
 
 ## الاختبارات
 
-31 اختبار خضراء تغطي: عقد التصنيفات، السكيما المرجعية، عقد المساعد (intents + dates)، جدولة التذكيرات، normalization الدارجة للبحث، محتوى الأذكار، تحويل التاريخ الهجري، تحليل الصور ومحرك التوقيت. اختبار `auth.logout` متعمد `skip` حتى يكتمل ربط المصادقة.
+32 اختبار خضراء تغطي: عقد التصنيفات، السكيما المرجعية، عقد المساعد (intents + dates)، جدولة التذكيرات، normalization الدارجة للبحث، محتوى الأذكار، تحويل التاريخ الهجري، تحليل الصور، محرك التوقيت وwatcher اللقطات. اختبار `auth.logout` متعمد `skip` حتى يكتمل ربط المصادقة.
+
+### مراقب اللقطات (Screenshot watcher — dev build)
+
+`modules/screenshot-watcher` هو expo module محلي كيراقب `MediaStore` ب ContentObserver وكيصيفط حدث `onScreenshotTaken` ملي كتّاخد لقطة جديدة — حتى فالخلفية. كيخدم **غير فـ development build** (ماشي فـ Expo Go):
+
+```bash
+npx expo run:android   # كيبني dev build محلي
+# ولا
+eas build --profile development --platform android
+```
 
 ## خارطة الطريق (Roadmap)
 
@@ -87,7 +97,7 @@ VITE_APP_ID= / OWNER_OPEN_ID=
 |---|---|---|
 | MVP | ديتيكشن اللقطات (MediaLibrary scan) + حفظ يدوي + تذكير بوقت مختار | ✅ مدموجة |
 | V2 | OCR + تصنيف المحتوى بالـ vision (`content.analyzeImage`) | ✅ مدموجة (Forge vision API) |
-| V2+ | Native module كيراقب اللقطات فالخلفية (FileObserver) | 📋 جاية |
+| V2+ | Native module كيراقب اللقطات فالخلفية (MediaStore ContentObserver) | ✅ مدموجة — `modules/screenshot-watcher` (كيحتاج dev build) |
 | V3 | محرك توقيت ML كامل على السيرفر (بحسب الـ prompt الأصلي) | 🧪 نسخة أولية heuristic محليا فـ `shared/timing-engine.ts` |
 | V4 | MCP: Notion / Google Drive | 📋 جاية |
 
