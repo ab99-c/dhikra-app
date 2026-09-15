@@ -20,7 +20,7 @@ const assistantSchema = {
   },
 } as const;
 
-function responseText(content: string | Array<{ type: string; text?: string }>) {
+function responseText(content: string | { type: string; text?: string }[]) {
   return Array.isArray(content) ? content.map((part) => part.text || "").join("\n") : content;
 }
 

@@ -3,7 +3,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type {
   ContentLibraryItem,
   ContentStatus,
-  ContentTheme,
   NewContentLibraryItem,
 } from "@/shared/content-library";
 
