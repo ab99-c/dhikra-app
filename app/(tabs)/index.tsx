@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +14,8 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
+import { useFocusEffect } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
 import {
@@ -23,6 +26,12 @@ import {
   listContentLibrary,
   markContentRevisited,
 } from "@/lib/content-library";
+import {
+  readScreenshotBase64,
+  scanRecentScreenshots,
+  type DetectedScreenshot,
+} from "@/lib/screenshots";
+import { DELAY_PRESETS_MS, planNextReminder } from "@/shared/timing-engine";
 import {
   CONTENT_THEMES,
   delayLabel,
@@ -54,7 +63,11 @@ export default function HomeScreen() {
   const [chatQuery, setChatQuery] = useState("");
   const [chatAnswer, setChatAnswer] = useState<AssistantResponse | null>(null);
   const [savingReminder, setSavingReminder] = useState(false);
+  const [shots, setShots] = useState<DetectedScreenshot[]>([]);
+  const [shotsLoading, setShotsLoading] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const chatMutation = trpc.assistant.chat.useMutation();
+  const analyzeMutation = trpc.content.analyzeImage.useMutation();
 
   const refresh = useCallback(async (nextQuery = query) => {
     const [nextItems, nextTotal] = await Promise.all([
@@ -64,6 +77,24 @@ export default function HomeScreen() {
     setItems(nextItems);
     setTotal(nextTotal);
   }, [query]);
+
+  const refreshScreenshots = useCallback(async () => {
+    if (Platform.OS === "web") return;
+    setShotsLoading(true);
+    try {
+      setShots(await scanRecentScreenshots({ limit: 10 }));
+    } catch {
+      // Permissions refused or media library unavailable — stay quiet.
+    } finally {
+      setShotsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshScreenshots();
+    }, [refreshScreenshots]),
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -87,7 +118,13 @@ export default function HomeScreen() {
     if (!text || saving) return;
     setSaving(true);
     try {
-      await insertContentLibraryItem({
+      const history = await listContentLibrary("");
+      const plan = planNextReminder(history, new Date());
+      const scheduledFor =
+        delay === "decide_for_me"
+          ? plan.scheduledForIso
+          : new Date(Date.now() + DELAY_PRESETS_MS[delay]).toISOString();
+      const id = await insertContentLibraryItem({
         userId: "local-user",
         sourceType: "manual_note",
         sourceUri: null,
@@ -97,10 +134,16 @@ export default function HomeScreen() {
         imageContextTags: [theme],
         theme,
         capturedAt: new Date().toISOString(),
-        status: "captured",
+        status: "queued",
         userDelayPref: delay,
-        scheduledFor: null,
+        scheduledFor,
       });
+      await scheduleDhikraReminder({
+        title: "ذِكْرى — وقت المراجعة",
+        body: text.slice(0, 120),
+        dateIso: scheduledFor,
+        memoryId: id,
+      }).then((notificationId) => attachNotificationToItem(id, notificationId));
       setDraft("");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refresh(query);
@@ -108,6 +151,87 @@ export default function HomeScreen() {
       Alert.alert("ما تسجلاتش", "عاود المحاولة من فضلك.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveScreenshot = async (shot: DetectedScreenshot) => {
+    try {
+      const existing = await listContentLibrary("");
+      if (existing.some((item) => item.sourceUri === shot.uri)) {
+        setShots((prev) => prev.filter((candidate) => candidate.id !== shot.id));
+        return;
+      }
+      const plan = planNextReminder(existing, new Date());
+      const id = await insertContentLibraryItem({
+        userId: "local-user",
+        sourceType: "screenshot",
+        sourceUri: shot.uri,
+        title: shot.filename || "لقطة شاشة",
+        rawText: `لقطة شاشة: ${shot.filename || "بدون اسم"}`,
+        ocrText: null,
+        imageContextTags: ["screenshot"],
+        theme: "other",
+        capturedAt: new Date(shot.createdAt).toISOString(),
+        status: "queued",
+        userDelayPref: "decide_for_me",
+        scheduledFor: plan.scheduledForIso,
+      });
+      await scheduleDhikraReminder({
+        title: "ذِكْرى — وقت المراجعة",
+        body: "اللقطة ديالك فـ الانتظار",
+        dateIso: plan.scheduledForIso,
+        memoryId: id,
+      }).then((notificationId) => attachNotificationToItem(id, notificationId));
+      setShots((prev) => prev.filter((candidate) => candidate.id !== shot.id));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await refresh(query);
+    } catch {
+      Alert.alert("ما تسجلاتش", "عاود المحاولة من فضلك.");
+    }
+  };
+
+  const analyzeScreenshot = async (shot: DetectedScreenshot) => {
+    if (analyzingId) return;
+    setAnalyzingId(shot.id);
+    try {
+      const { base64, mimeType } = await readScreenshotBase64(shot);
+      const analysis = await analyzeMutation.mutateAsync({ base64, mimeType });
+      const existing = await listContentLibrary("");
+      if (existing.some((item) => item.sourceUri === shot.uri)) {
+        setShots((prev) => prev.filter((candidate) => candidate.id !== shot.id));
+        return;
+      }
+      const scheduledFor =
+        analysis.suggestedDelay === "decide_for_me"
+          ? planNextReminder(existing, new Date()).scheduledForIso
+          : new Date(Date.now() + DELAY_PRESETS_MS[analysis.suggestedDelay]).toISOString();
+      const id = await insertContentLibraryItem({
+        userId: "local-user",
+        sourceType: "screenshot",
+        sourceUri: shot.uri,
+        title: analysis.title || shot.filename || "لقطة شاشة",
+        rawText: analysis.ocrText,
+        ocrText: analysis.ocrText,
+        imageContextTags: [...analysis.tags, "screenshot"],
+        theme: analysis.theme,
+        capturedAt: new Date(shot.createdAt).toISOString(),
+        status: "queued",
+        userDelayPref: analysis.suggestedDelay,
+        scheduledFor,
+      });
+      await scheduleDhikraReminder({
+        title: "ذِكْرى — وقت المراجعة",
+        body: analysis.title || analysis.ocrText.slice(0, 120),
+        dateIso: scheduledFor,
+        memoryId: id,
+      }).then((notificationId) => attachNotificationToItem(id, notificationId));
+      setShots((prev) => prev.filter((candidate) => candidate.id !== shot.id));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await refresh(query);
+    } catch {
+      Alert.alert("التحليل ما خدمش", "تأكد من الاتصال بالـbackend وعاود المحاولة.");
+    } finally {
+      setAnalyzingId(null);
     }
   };
 
@@ -418,6 +542,49 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
 
+              {Platform.OS !== "web" && shots.length > 0 && (
+                <View style={styles.shotsSection}>
+                  <View style={styles.listHeading}>
+                    <Text style={[styles.listTitle, { color: colors.foreground }]}>آخر اللقطات ديالك</Text>
+                    <Pressable onPress={refreshScreenshots} hitSlop={8}>
+                      <Text style={[styles.listHint, { color: colors.primary }]}>
+                        {shotsLoading ? "..." : "حدّث"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.shotsRow}
+                  >
+                    {shots.map((shot) => (
+                      <View key={shot.id} style={[styles.shotCard, { borderColor: colors.border }]}>
+                        <Image source={{ uri: shot.uri }} style={styles.shotThumb} contentFit="cover" />
+                        <View style={styles.shotActions}>
+                          <Pressable
+                            onPress={() => saveScreenshot(shot)}
+                            style={[styles.shotButton, { backgroundColor: colors.primary }]}
+                          >
+                            <Text style={styles.shotButtonText}>حفظ</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => analyzeScreenshot(shot)}
+                            disabled={analyzingId !== null}
+                            style={[styles.shotButton, { borderColor: colors.primary, borderWidth: 1 }]}
+                          >
+                            {analyzingId === shot.id ? (
+                              <ActivityIndicator color={colors.primary} size="small" />
+                            ) : (
+                              <Text style={[styles.shotButtonText, { color: colors.primary }]}>حلّلها ✦</Text>
+                            )}
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
               <View style={styles.listHeading}>
                 <Text style={[styles.listTitle, { color: colors.foreground }]}>آخر الذكريات</Text>
                 <Text style={[styles.listHint, { color: colors.muted }]}>Private by default</Text>
@@ -514,6 +681,13 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", marginTop: 4 },
   primaryButtonText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   disabled: { opacity: 0.45 },
+  shotsSection: { marginBottom: 24 },
+  shotsRow: { flexDirection: "row-reverse", gap: 10, paddingBottom: 4 },
+  shotCard: { borderWidth: 1, borderRadius: 16, overflow: "hidden", width: 104 },
+  shotThumb: { width: 104, height: 150 },
+  shotActions: { padding: 6, gap: 5 },
+  shotButton: { minHeight: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  shotButtonText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   listHeading: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   listTitle: { fontSize: 18, fontWeight: "800", textAlign: "right" },
   listHint: { fontSize: 10 },

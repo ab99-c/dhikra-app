@@ -89,6 +89,14 @@ const config: ExpoConfig = {
     "expo-notifications",
     "expo-image-picker",
     [
+      "expo-media-library",
+      {
+        photosPermission: "ذِكْرى كيحتاج الوصول للصور باش يجيب اللقطات ديالك ويحللها.",
+        savePhotosPermission: "ذِكْرى كيحتاج الإذن باش يحفظ الصور فالمكتبة.",
+        isAccessMediaLocationEnabled: false,
+      },
+    ],
+    [
       "expo-audio",
       {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
