@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  Switch,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -49,6 +50,8 @@ import { trpc } from "@/lib/trpc";
 import type { AssistantResponse } from "@/shared/assistant";
 import { scheduleDhikraReminder } from "@/lib/reminders";
 import type { ImageAnalysis } from "@/server/_core/imageAnalysis";
+import { loadMoodSettings, setCameraEmotionEnabled, setMood, type MoodSettings } from "@/lib/mood-settings";
+import { detectMoodFromText, moodEmoji, moodLabel, rankItemsForMood, type MoodState } from "@/shared/mood";
 
 const QUICK_PROMPTS = ["فين الصورة ديال العيد؟", "جبد ليا الاقتباسات", "شنو خاصني نعاود نشوف؟"];
 
@@ -74,6 +77,8 @@ export default function HomeScreen() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTags, setEditTags] = useState("");
   const [editTheme, setEditTheme] = useState<ContentTheme>("other");
+  const [moodSettings, setMoodSettings] = useState<MoodSettings | null>(null);
+  const [moodCheckinOpen, setMoodCheckinOpen] = useState(false);
   const chatMutation = trpc.assistant.chat.useMutation();
   const analyzeMutation = trpc.content.analyzeImage.useMutation();
 
@@ -82,9 +87,9 @@ export default function HomeScreen() {
       listContentLibrary(nextQuery),
       countContentLibrary(),
     ]);
-    setItems(nextItems);
+    setItems(moodSettings?.mood ? rankItemsForMood(nextItems, moodSettings.mood, moodSettings.mapping) : nextItems);
     setTotal(nextTotal);
-  }, [query]);
+  }, [query, moodSettings]);
 
   const refreshScreenshots = useCallback(async () => {
     if (Platform.OS === "web") return;
@@ -116,14 +121,32 @@ export default function HomeScreen() {
 
   useEffect(() => {
     let mounted = true;
-    initializeContentLibrary()
-      .then(() => refresh(""))
+    Promise.all([initializeContentLibrary(), loadMoodSettings()])
+      .then(([, settings]) => {
+        if (mounted) setMoodSettings(settings);
+        return refresh("");
+      })
       .catch(() => Alert.alert("وقع مشكل", "ما قدرناش نفتحو مكتبة الذكريات."))
       .finally(() => mounted && setLoading(false));
     return () => {
       mounted = false;
     };
-  }, [refresh]);
+  }, []);
+
+  const chooseMood = async (nextMood: MoodState) => {
+    const settings = await setMood(nextMood);
+    setMoodSettings(settings);
+    setMoodCheckinOpen(false);
+    await refresh(query);
+  };
+
+  const updateMoodFromDraft = (text: string) => {
+    setDraft(text);
+    if (text.trim().length >= 12) {
+      const inferred = detectMoodFromText(text);
+      if (inferred !== "neutral" && moodSettings?.mood !== inferred) void chooseMood(inferred);
+    }
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -469,6 +492,32 @@ export default function HomeScreen() {
                   </Pressable>
                 ))}
               </View>
+              <View style={[styles.moodCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={styles.moodHeading}>
+                  <View>
+                    <Text style={[styles.moodTitle, { color: colors.foreground }]}>كيف داير دابا؟</Text>
+                    <Text style={[styles.moodHint, { color: colors.muted }]}>اختيارك كيبقى محلي وكيعاوننا نطلعولك الذكرى المناسبة.</Text>
+                  </View>
+                  <Text style={styles.moodEmoji}>{moodSettings?.mood ? moodEmoji[moodSettings.mood] : "◌"}</Text>
+                </View>
+                <Pressable onPress={() => setMoodCheckinOpen((open) => !open)} style={[styles.moodButton, { borderColor: colors.primary }]}>
+                  <Text style={[styles.moodButtonText, { color: colors.primary }]}>{moodSettings?.mood ? `دابا: ${moodLabel[moodSettings.mood]}` : "دير check-in سريع"}</Text>
+                </Pressable>
+                {moodCheckinOpen && (
+                  <View style={styles.moodOptions}>
+                    {(["stressed", "low", "neutral", "joyful"] as MoodState[]).map((value) => (
+                      <Pressable key={value} onPress={() => chooseMood(value)} style={[styles.moodOption, { borderColor: moodSettings?.mood === value ? colors.primary : colors.border }]}>
+                        <Text style={styles.moodOptionEmoji}>{moodEmoji[value]}</Text>
+                        <Text style={[styles.moodOptionText, { color: colors.foreground }]}>{moodLabel[value]}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+                <View style={styles.privacyRow}>
+                  <Text style={[styles.privacyText, { color: colors.muted }]}>الكاميرا مطفّية: ما كاين لا تصوير لا إرسال للوجه.</Text>
+                  <Switch value={moodSettings?.cameraEmotionEnabled ?? false} onValueChange={async (enabled) => setMoodSettings(await setCameraEmotionEnabled(enabled))} disabled />
+                </View>
+              </View>
 
               <Pressable
                 onPress={() => setChatOpen((value) => !value)}
@@ -516,7 +565,7 @@ export default function HomeScreen() {
                 </View>
                 <TextInput
                   value={draft}
-                  onChangeText={setDraft}
+                  onChangeText={updateMoodFromDraft}
                   placeholder="لسّق رابط، كتب اقتباس، ولا وصف الصورة..."
                   placeholderTextColor={colors.muted}
                   style={[styles.noteInput, { color: colors.foreground, borderColor: colors.border }]}
@@ -760,6 +809,19 @@ const styles = StyleSheet.create({
   promptRow: { flexDirection: "row-reverse", gap: 7, marginBottom: 18 },
   prompt: { borderWidth: 1, borderRadius: 14, paddingVertical: 7, paddingHorizontal: 10 },
   promptText: { fontSize: 11, fontWeight: "700" },
+  moodCard: { borderWidth: 1, borderRadius: 18, padding: 13, marginBottom: 14 },
+  moodHeading: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
+  moodTitle: { fontSize: 14, fontWeight: "800", textAlign: "right" },
+  moodHint: { fontSize: 10, textAlign: "right", marginTop: 4 },
+  moodEmoji: { fontSize: 25 },
+  moodButton: { minHeight: 36, borderWidth: 1, borderRadius: 11, alignItems: "center", justifyContent: "center", marginTop: 10 },
+  moodButtonText: { fontSize: 11, fontWeight: "800" },
+  moodOptions: { flexDirection: "row-reverse", gap: 6, marginTop: 9 },
+  moodOption: { flex: 1, borderWidth: 1, borderRadius: 10, minHeight: 48, alignItems: "center", justifyContent: "center" },
+  moodOptionEmoji: { fontSize: 17 },
+  moodOptionText: { fontSize: 9, fontWeight: "700", marginTop: 2 },
+  privacyRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", marginTop: 9 },
+  privacyText: { flex: 1, fontSize: 9, textAlign: "right", marginLeft: 6 },
   chatToggle: { borderRadius: 15, minHeight: 44, paddingHorizontal: 14, flexDirection: "row-reverse", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 12 },
   chatToggleText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   chatToggleIcon: { color: "#fff", fontSize: 17 },
